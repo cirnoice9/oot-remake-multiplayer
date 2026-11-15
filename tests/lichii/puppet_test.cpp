@@ -859,6 +859,43 @@ TEST_CASE("puppet gear: a mask is worn in state 1, other pieces in state 2") {
     CHECK(calls[1].x[1] == 8u);
     CHECK(calls[1].x[3] == 2u);
 }
+TEST_CASE("puppet gear: the Hookshot is left off the puppet, and its slot is not ours (issue 232)") {
+    Game g;
+    Director d;
+    MakeLive(d, g);
+    constexpr std::uint64_t kParts = 0x500000000;
+    constexpr std::uint64_t kEu = kParts + 0x800;
+    g.guest.Map(kParts, 0x1000);
+    g.guest.Set(kActor + addr::kActorParts, kParts);
+    g.guest.Set(kParts + addr::kPartsEquipmentUser, kEu);
+    Target t = At(1, 4, 5, 6);
+    t.gear[2] = "Armor_Child_Mask_Skull";
+    d.SetInput(Wants({t}));
+    auto calls = Frame(d, g, 20);
+    REQUIRE(calls.size() == 1);  // the mask only
+    CHECK(calls[0].x[1] == 7u);
+
+    // The held slot is the Hookshot: no call is made for it, now or later.
+    t.gear[CoopPuppet::kGearHeld] = "Weapon_Range_Hookshot";
+    d.SetInput(Wants({t}));
+    CHECK(Frame(d, g, 100).empty());
+    CHECK(Frame(d, g, 3000).empty());
+    CHECK(Frame(d, g, 9000).empty());
+
+    // Its going away is no take-off either: the mask stays, nothing is made again.
+    t.gear[CoopPuppet::kGearHeld] = "";
+    d.SetInput(Wants({t}));
+    CHECK(Frame(d, g, 10000).empty());
+    CHECK(Frame(d, g, 20000).empty());
+
+    // Any other piece of the same slot is worn as before: the slingshot, kind 5.
+    t.gear[CoopPuppet::kGearHeld] = "Weapon_Range_SlingShot";
+    d.SetInput(Wants({t}));
+    calls = Frame(d, g, 30000);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0].function == kBase + addr::kEquip);
+    CHECK(calls[0].x[1] == 5u);
+}
 TEST_CASE("puppet gear: a mask taken off is taken off with the game's call, a held item is only put away") {
     Game g;
     Director d;

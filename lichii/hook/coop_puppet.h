@@ -230,6 +230,22 @@ constexpr bool GearIsArmor(std::size_t i, std::string_view name) {
 constexpr bool GearIsCarried(std::size_t i) {
     return i == kGearHeld || (i >= kGearSubWeapon && i <= kGearSubTool);
 }
+// A piece the game must not make on a puppet (issue 232, 2026-11-16). Worn on
+// the puppet, `Weapon_Range_Hookshot` takes the other game down a few seconds
+// later: the game's own update of that piece reads a pointer a puppet does not
+// have (guest 0x7d8 on BaseProcExecutor, the same missing-Player read patch
+// 0002's null page turns into 0 for the create) and the read faults. Seen
+// three times in a row, on the frame after `wears held
+// 'Weapon_Range_Hookshot' (returned 0x1)`, with every other piece of the same
+// player worn fine, and the player never fired it: the piece is stepped by the
+// game and cannot follow the puppet, parked or not. The Longshot is the same
+// actor family. Such a piece stays off the puppet: only its own player's Link
+// shows it. LICHII_COOP_PUPPET_HOOKSHOT=1 wears it again (a test). By name and
+// not by slot: it is the piece the game steps, whichever slot sends it.
+constexpr bool GearIsUnsafe(std::string_view name) {
+    return name.find("Hookshot") != std::string_view::npos ||
+           name.find("Longshot") != std::string_view::npos;
+}
 // The equipment slot each of them lands in (seen in the game: the sword in
 // slot 0, the shield in slot 4, the slingshot in slot 3); -1: not a piece
 // that is drawn or put away.

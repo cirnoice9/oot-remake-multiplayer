@@ -38,6 +38,23 @@ bool OcarinaSoundOn() {
     return on;
 }
 
+// Whether a piece the game crashed on is worn on a puppet anyway (issue 232).
+// Off by default: a GearIsUnsafe piece stays off. LICHII_COOP_PUPPET_HOOKSHOT=1
+// puts them back, for a test that checks whether a later build can take them.
+bool WearsUnsafe() {
+    static const bool on = [] {
+        const char* v = std::getenv("LICHII_COOP_PUPPET_HOOKSHOT");
+        return v != nullptr && v[0] != '\0' && std::string_view(v) != "0";
+    }();
+    return on;
+}
+
+// A piece `Equip` leaves off the puppet: nothing is made for it, and the piece
+// its slot may still hold is neither put away nor re-worn: that slot is not
+// ours to change while the player wears one of these.
+bool GearLeftOff(const std::string& name) {
+    return GearIsUnsafe(name) && !WearsUnsafe();
+}
 
 template <typename T>
 bool ReadValue(Guest& guest, std::uint64_t address, T& out) {
@@ -1114,7 +1131,21 @@ std::optional<Call> Director::Equip(Slot& slot, const Target& target, Guest& gue
     }
     for (std::size_t i = 0; i < target.gear.size(); ++i) {
         const auto& want = target.gear[i];
-        if (want && want->empty() && !slot.worn[i].empty() && !GearIsCarried(i)) {
+        if (want && !want->empty() && GearLeftOff(*want)) {
+            // Issue 232: the game crashed with this piece on a puppet (the
+            // Hookshot, in the held slot). It stays off; its player's own Link
+            // still shows it. Kept in `worn` as theirs, so the slot is not
+            // asked again, and a later piece of theirs is worn as usual.
+            if (slot.worn[i] != *want) {
+                Say("P" + std::to_string(slot.number) + " " + kGearNames[i] + " '" + *want +
+                    "' stays off the puppet: the game crashed with it worn here (issue 232; "
+                    "LICHII_COOP_PUPPET_HOOKSHOT=1 wears it again)");
+                slot.worn[i] = *want;
+            }
+            continue;
+        }
+        if (want && want->empty() && !slot.worn[i].empty() && !GearIsCarried(i) &&
+            !GearLeftOff(slot.worn[i])) {
             // Empty for a moment (a load) is not taken off: kTakeOffMs first.
             if (slot.off_since_ms[i] == 0) {
                 slot.off_since_ms[i] = std::max<std::uint64_t>(now_ms, 1);
@@ -1195,8 +1226,8 @@ void Director::LeftBehind(Slot& slot, Guest& guest, std::uint64_t now_ms) {
     }
     for (std::size_t i = 0; i < kGearSlots.size(); ++i) {
         const int s = kGearSlots[i];
-        if (s < 0 || slot.worn[i].empty()) {
-            continue;
+        if (s < 0 || slot.worn[i].empty() || GearLeftOff(slot.worn[i])) {
+            continue;  // (a piece left off the puppet, issue 232: its slot is not ours)
         }
         if (GearIsCarried(i) && (slot.in_hand & (1u << s)) == 0) {
             continue;  // put away, the game keeps a held item elsewhere (state 6)
@@ -1271,8 +1302,8 @@ std::optional<Call> Director::Hold(Slot& slot, const Target& target, Guest& gues
     std::uint64_t check_eu = 0;
     for (std::size_t i = 0; i < kGearSlots.size(); ++i) {
         const int s = kGearSlots[i];
-        if (s < 0 || slot.worn[i].empty()) {
-            continue;
+        if (s < 0 || slot.worn[i].empty() || GearLeftOff(slot.worn[i])) {
+            continue;  // (a piece left off the puppet, issue 232: its slot is not ours)
         }
         const auto bit = static_cast<std::uint8_t>(1u << s);
         const bool drawn = (*target.drawn & bit) != 0;
