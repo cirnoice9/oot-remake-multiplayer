@@ -1134,13 +1134,27 @@ std::optional<Call> Director::Equip(Slot& slot, const Target& target, Guest& gue
         if (want && !want->empty() && GearLeftOff(*want)) {
             // Issue 232: the game crashed with this piece on a puppet (the
             // Hookshot, in the held slot). It stays off; its player's own Link
-            // still shows it. Kept in `worn` as theirs, so the slot is not
-            // asked again, and a later piece of theirs is worn as usual.
+            // still shows it.
+            //
+            // The piece that was in this slot before it was worn stays where
+            // the game put it: the slingshot in slot 3 outlived a switch to the
+            // Hookshot (daurosk, on PR 233). A slot holds one piece, and the
+            // game made that one for us, so the puppet is made again without
+            // it: the same way a mask taken off goes (issue 91), since no call
+            // is known to take a held piece away.
             if (slot.worn[i] != *want) {
                 Say("P" + std::to_string(slot.number) + " " + kGearNames[i] + " '" + *want +
                     "' stays off the puppet: the game crashed with it worn here (issue 232; "
                     "LICHII_COOP_PUPPET_HOOKSHOT=1 wears it again)");
-                slot.worn[i] = *want;
+                const bool had_piece = !slot.worn[i].empty();
+                const std::string was = slot.worn[i];
+                slot.worn[i] = *want;  // (kept as theirs, so the slot is not asked again)
+                if (had_piece) {
+                    Say("P" + std::to_string(slot.number) + " is made again: '" + was +
+                        "' cannot be taken off the slot it keeps");
+                    slot.remake = true;
+                    return std::nullopt;
+                }
             }
             continue;
         }

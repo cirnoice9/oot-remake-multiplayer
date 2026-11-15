@@ -895,6 +895,29 @@ TEST_CASE("puppet gear: the Hookshot is left off the puppet, and its slot is not
     REQUIRE(calls.size() == 1);
     CHECK(calls[0].function == kBase + addr::kEquip);
     CHECK(calls[0].x[1] == 5u);
+
+    // Slingshot -> Hookshot: the slingshot must not stay in slot 3, and no
+    // call is known to take a held piece away, so the puppet is made again
+    // without it (daurosk, PR 233: "the slingshot stays in slot 3").
+    // (the frame that learns it only marks the remake: the delete is the next
+    // frame's, as for a mask taken off)
+    t.gear[CoopPuppet::kGearHeld] = "Weapon_Range_Hookshot";
+    d.SetInput(Wants({t}));
+    CHECK(Frame(d, g, 40000).empty());
+    calls = Frame(d, g, 41000);
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0].function == kBase + addr::kRequestDelete);
+    // Made again (a delete, then a malloc and a create over the next frames),
+    // and the Hookshot is never worn on it.
+    bool equipped = false;
+    for (std::uint64_t ms = 42000; ms <= 60000; ms += 1000) {
+        for (const auto& c : Frame(d, g, ms)) {
+            if (c.function == kBase + addr::kEquip) {
+                equipped = true;
+            }
+        }
+    }
+    CHECK_FALSE(equipped);
 }
 TEST_CASE("puppet gear: a mask taken off is taken off with the game's call, a held item is only put away") {
     Game g;
