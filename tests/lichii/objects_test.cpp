@@ -983,6 +983,30 @@ TEST_CASE("objects: a pickup another game took is removed here") {
     CHECK(sync.Removes().empty());
 }
 
+TEST_CASE("objects: a Gold Skulltula whose key the save already holds is removed, key and key + 2") {
+    // The game makes a placement's actor from its key as the scene loads and
+    // never looks again (docs/items.md, "the loaded Skulltula stays"). The key
+    // scan in Objects::Share feeds a true key to Take, so an actor the game has
+    // just made for it goes as the walk sees it.
+    Sync sync;
+    Seen skulltula;
+    skulltula.address = 0x900;
+    skulltula.name = "Enemy_Skulltula_Gold";
+    skulltula.hash = 0x2df265292516bdf0;
+    skulltula.position = {3.0f, 0.0f, 4.0f};
+    CHECK(CoopObjects::RemovedWhenTaken(skulltula.name));
+    Tick(sync, 0, {skulltula, Enemy(0x100, 0x11, 2)});
+    CHECK(sync.Removes().empty());
+
+    // key was true in the save, key + 2 as well (a placement is both)
+    sync.Take(0x2df265292516bdf0);
+    sync.Take(0x2df265292516bdf0 + 2);
+    Tick(sync, 10 * kMs, {skulltula, Enemy(0x100, 0x11, 2)});
+    CHECK(sync.Taken(0x2df265292516bdf0));
+    CHECK(sync.Taken(0x2df265292516bdf0 + 2));
+    CHECK(sync.Removes() == std::vector<std::uint64_t>{0x900});
+}
+
 TEST_CASE("objects: a chest opened elsewhere is shown open here, never removed (issue 195)") {
     Sync sync;
     Seen chest;
