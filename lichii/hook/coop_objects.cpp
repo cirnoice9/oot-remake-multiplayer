@@ -1343,37 +1343,6 @@ public:
             sync_.Receive(state);
             LOG_INFO(Core, "coop: objects: test take {:#x}", test_take_);
         }
-        // A Gold Skulltula whose key this save already holds is not made again
-        // (2026-11-16): the game reads a placement's key once, when it makes
-        // the actor, and a key that came in from another game after the scene
-        // loaded does not take the actor away (docs/items.md, "the loaded
-        // Skulltula stays"). The keys are fed to the same "taken elsewhere"
-        // path a pickup from another player takes, so an actor the game has
-        // just made for an already-true key is deleted as the walk sees it,
-        // whatever wrote the key. Once a scene, on the first walk after it.
-        if (sharing_ && main_ != 0) {
-            const bool scene_changed = *scene != keys_scene_;
-            if (scene_changed || !keys_done_) {
-                keys_scene_ = *scene;
-                keys_done_ = true;
-                CoopHook::EmulatorMemory memory(system.ApplicationMemory(), main_);
-                coop::host::GameFlags flags(memory);
-                std::size_t took = 0;
-                for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
-                    // A placement is its key and key + 2 (docs/items.md).
-                    if (flags.get_key64(key).value_or(false) ||
-                        flags.get_key64(key + 2).value_or(false)) {
-                        sync_.Take(key);
-                        sync_.Take(key + 2);
-                        ++took;
-                    }
-                }
-                if (took != 0) {
-                    LOG_INFO(Core, "coop: objects: {} Gold Skulltulas this save has taken are left out of {}",
-                             took, *scene);
-                }
-            }
-        }
         if (drive_ && sharing_) {
             Drive(system, server_now_us);
         }
@@ -1471,6 +1440,36 @@ public:
             sync_.SetUnready(g_unready);
         }
         sync_.Tick(*scene, self, server_now_us, seen, send, writes);
+        // A Gold Skulltula whose key this save already holds is not made again
+        // (2026-11-16): the game reads a placement's key once, when it makes
+        // the actor, and a key that came in from another game after the scene
+        // loaded does not take the actor away (docs/items.md, "the loaded
+        // Skulltula stays"). The keys are fed to the same "taken elsewhere"
+        // path a pickup from another player takes, so an actor the game has
+        // just made for an already-true key is deleted as the next walk sees
+        // it, whatever wrote the key.
+        //
+        // After Tick, never before: a scene's first Tick calls Reset(), which
+        // clears the takes queued for it (a take queued before that is lost).
+        if (sharing_ && main_ != 0 && *scene != keys_scene_) {
+            keys_scene_ = *scene;
+            CoopHook::EmulatorMemory memory(system.ApplicationMemory(), main_);
+            coop::host::GameFlags flags(memory);
+            std::size_t took = 0;
+            for (const std::uint64_t key : coop::host::gold_skulltula_keys()) {
+                // A placement is its key and key + 2 (docs/items.md).
+                if (flags.get_key64(key).value_or(false) ||
+                    flags.get_key64(key + 2).value_or(false)) {
+                    sync_.Take(key);
+                    sync_.Take(key + 2);
+                    ++took;
+                }
+            }
+            if (took != 0) {
+                LOG_INFO(Core, "coop: objects: {} Gold Skulltulas this save has taken are left out of {}",
+                         took, *scene);
+            }
+        }
         if (const unsigned twice = sync_.ChestsOpenedTwice(); twice != chests_twice_seen_) {
             // Issue 195: a chest shown open that our Link opened again; the
             // flag watcher takes back its content's count (TakeChestsOpenedTwice).
@@ -2082,7 +2081,6 @@ public:
     // were fed at all (Share's key scan): a scene's actors are made once, so
     // one scan a scene is enough.
     std::string keys_scene_;
-    bool keys_done_ = false;
     int drive_mode_ = 0;
 
 private:
